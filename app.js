@@ -1,35 +1,9 @@
-const STORAGE_KEY = "tiny-diary.entries.v1";
+const STORAGE_KEY = "study-log.entries.v1";
 
-const moods = {
-  happy: {
-    label: "うれしい",
-    face: "😊",
-    score: 5,
-  },
-  calm: {
-    label: "おだやか",
-    face: "😌",
-    score: 4,
-  },
-  normal: {
-    label: "ふつう",
-    face: "🙂",
-    score: 3,
-  },
-  tired: {
-    label: "つかれた",
-    face: "😵‍💫",
-    score: 2,
-  },
-  sad: {
-    label: "しょんぼり",
-    face: "🥲",
-    score: 1,
-  },
-};
-
-const form = document.querySelector("#diary-form");
+const form = document.querySelector("#study-form");
 const dateInput = document.querySelector("#entry-date");
+const subjectInput = document.querySelector("#entry-subject");
+const minutesInput = document.querySelector("#entry-minutes");
 const noteInput = document.querySelector("#entry-note");
 const clearButton = document.querySelector("#clear-button");
 const entryList = document.querySelector("#entry-list");
@@ -40,10 +14,9 @@ const editingLabel = document.querySelector("#editing-label");
 const entryCount = document.querySelector("#entry-count");
 const summaryRow = document.querySelector("#summary-row");
 const searchInput = document.querySelector("#search-input");
-const moodFilter = document.querySelector("#mood-filter");
 const rhythmChart = document.querySelector("#rhythm-chart");
-const biorhythmMessage = document.querySelector("#biorhythm-message");
-const biorhythmDetail = document.querySelector("#biorhythm-detail");
+const progressMessage = document.querySelector("#progress-message");
+const progressDetail = document.querySelector("#progress-detail");
 
 let entries = loadEntries();
 
@@ -88,39 +61,32 @@ function sortEntries() {
   entries.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-function getSelectedMood() {
-  return form.elements.mood.value;
-}
-
-function setSelectedMood(mood) {
-  const moodInput = form.querySelector(`input[name="mood"][value="${mood}"]`);
-
-  if (moodInput) {
-    moodInput.checked = true;
-  }
-}
-
-function clearSelectedMood() {
-  form.querySelectorAll('input[name="mood"]').forEach((input) => {
-    input.checked = false;
-  });
-}
-
 function formatDate(dateText) {
-  const date = parseIsoDate(dateText);
   return new Intl.DateTimeFormat("ja-JP", {
     month: "long",
     day: "numeric",
     weekday: "short",
-  }).format(date);
+  }).format(parseIsoDate(dateText));
 }
 
 function formatShortDate(dateText) {
-  const date = parseIsoDate(dateText);
   return new Intl.DateTimeFormat("ja-JP", {
     month: "numeric",
     day: "numeric",
-  }).format(date);
+  }).format(parseIsoDate(dateText));
+}
+
+function formatDuration(minutes) {
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours === 0) {
+    return `${remainingMinutes}分`;
+  }
+
+  return remainingMinutes === 0
+    ? `${hours}時間`
+    : `${hours}時間${remainingMinutes}分`;
 }
 
 function escapeHtml(text) {
@@ -134,15 +100,10 @@ function escapeHtml(text) {
 
 function getFilteredEntries() {
   const query = searchInput.value.trim().toLowerCase();
-  const selectedMood = moodFilter.value;
 
   return entries.filter((entry) => {
-    const mood = moods[entry.mood];
-    const matchesMood = selectedMood === "all" || entry.mood === selectedMood;
-    const searchableText = `${entry.date} ${entry.note} ${mood?.label ?? ""}`.toLowerCase();
-    const matchesQuery = !query || searchableText.includes(query);
-
-    return matchesMood && matchesQuery;
+    const searchableText = `${entry.date} ${entry.subject} ${entry.note}`.toLowerCase();
+    return !query || searchableText.includes(query);
   });
 }
 
@@ -151,15 +112,18 @@ function renderEntries() {
 
   entryList.innerHTML = filteredEntries
     .map((entry) => {
-      const mood = moods[entry.mood] ?? moods.normal;
+      const note = entry.note
+        ? `<p class="entry-note">${escapeHtml(entry.note)}</p>`
+        : "";
 
       return `
         <li class="entry-card">
           <div class="entry-topline">
             <span class="entry-date">${formatDate(entry.date)}</span>
-            <span class="mood-badge">${mood.face} ${mood.label}</span>
+            <span class="duration-badge">${formatDuration(entry.minutes)}</span>
           </div>
-          <p class="entry-note">${escapeHtml(entry.note)}</p>
+          <h3 class="entry-subject">${escapeHtml(entry.subject)}</h3>
+          ${note}
           <div class="entry-actions">
             <button type="button" data-action="edit" data-date="${entry.date}">編集</button>
             <button class="danger-button" type="button" data-action="delete" data-date="${entry.date}">削除</button>
@@ -171,13 +135,13 @@ function renderEntries() {
 
   if (entries.length > 0 && filteredEntries.length === 0) {
     emptyState.innerHTML = `
-      <strong>条件に合う記録がありません</strong>
-      <span>検索ワードや気分フィルターを変えてみてください。</span>
+      <strong>検索に合う学習ログがありません</strong>
+      <span>別のキーワードで探してみてください。</span>
     `;
   } else {
     emptyState.innerHTML = `
-      <strong>まだ記録がありません</strong>
-      <span>今日の気分と一言メモを保存すると、ここに表示されます。</span>
+      <strong>学習ログはまだありません</strong>
+      <span>今日学んだことを記録して、最初の一歩を残しましょう。</span>
     `;
   }
 
@@ -188,19 +152,19 @@ function renderEntries() {
 function renderSummary() {
   entryCount.textContent = entries.length;
 
-  summaryRow.innerHTML = Object.entries(moods)
-    .map(([moodKey, mood]) => {
-      const count = entries.filter((entry) => entry.mood === moodKey).length;
-      return `<span class="summary-chip">${mood.face} ${mood.label} ${count}</span>`;
-    })
-    .join("");
+  const totalMinutes = entries.reduce((total, entry) => total + entry.minutes, 0);
+  const averageMinutes = entries.length ? Math.round(totalMinutes / entries.length) : 0;
+  summaryRow.innerHTML = `
+    <span class="summary-chip">合計 ${formatDuration(totalMinutes)}</span>
+    <span class="summary-chip">1件あたり ${formatDuration(averageMinutes)}</span>
+  `;
 }
 
-function renderBiorhythm() {
+function renderProgress() {
   if (entries.length === 0) {
     rhythmChart.innerHTML = "";
-    biorhythmMessage.textContent = "記録を保存すると表示されます";
-    biorhythmDetail.textContent = "最近7件の気分を波形グラフで表示します。";
+    progressMessage.textContent = "記録を保存すると、ここに表示されます";
+    progressDetail.textContent = "記録を続けると、最近の学習時間を確認できます。";
     return;
   }
 
@@ -208,77 +172,52 @@ function renderBiorhythm() {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 7)
     .reverse();
-  const totalScore = recentEntries.reduce((sum, entry) => {
-    return sum + (moods[entry.mood]?.score ?? moods.normal.score);
-  }, 0);
-  const average = totalScore / recentEntries.length;
-  const firstScore = moods[recentEntries[0].mood]?.score ?? moods.normal.score;
-  const lastEntry = recentEntries[recentEntries.length - 1];
-  const lastScore = moods[lastEntry.mood]?.score ?? moods.normal.score;
-  const trend = lastScore - firstScore;
+  const totalMinutes = recentEntries.reduce((total, entry) => total + entry.minutes, 0);
+  const averageMinutes = Math.round(totalMinutes / recentEntries.length);
 
-  rhythmChart.innerHTML = createBiorhythmSvg(recentEntries);
-
-  biorhythmMessage.textContent = getBiorhythmMessage(trend, average, recentEntries.length);
-  biorhythmDetail.textContent = `最近${recentEntries.length}件の平均: ${average.toFixed(1)} / 5`;
+  rhythmChart.innerHTML = createProgressSvg(recentEntries);
+  progressMessage.textContent = `合計 ${formatDuration(totalMinutes)} 学習しました`;
+  progressDetail.textContent = `最近${recentEntries.length}件の平均: ${formatDuration(averageMinutes)}`;
 }
 
-function createBiorhythmSvg(recentEntries) {
+function createProgressSvg(recentEntries) {
   const width = 360;
   const height = 170;
-  const padding = {
-    top: 22,
-    right: 18,
-    bottom: 34,
-    left: 28,
-  };
+  const padding = { top: 22, right: 18, bottom: 34, left: 28 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
+  const maxMinutes = Math.max(...recentEntries.map((entry) => entry.minutes));
   const points = recentEntries.map((entry, index) => {
-    const mood = moods[entry.mood] ?? moods.normal;
     const x =
       recentEntries.length === 1
         ? padding.left + chartWidth / 2
         : padding.left + (chartWidth / (recentEntries.length - 1)) * index;
-    const y = padding.top + ((5 - mood.score) / 4) * chartHeight;
+    const y = height - padding.bottom - (entry.minutes / maxMinutes) * chartHeight;
 
-    return {
-      x,
-      y,
-      entry,
-      mood,
-    };
+    return { x, y, entry };
   });
+  const linePath = buildSmoothPath(points);
+  const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
-  const lineShape =
-    points.length === 1
-      ? buildSinglePointWave(points[0], chartWidth)
-      : {
-          path: buildSmoothPath(points),
-          startX: points[0].x,
-          endX: lastPoint.x,
-        };
-  const areaPath = `${lineShape.path} L ${lineShape.endX} ${height - padding.bottom} L ${
-    lineShape.startX
-  } ${height - padding.bottom} Z`;
+  const areaPath = `${linePath} L ${lastPoint.x} ${height - padding.bottom} L ${firstPoint.x} ${
+    height - padding.bottom
+  } Z`;
 
   return `
     <svg
       class="rhythm-svg"
       viewBox="0 0 ${width} ${height}"
       role="img"
-      aria-label="最近${recentEntries.length}件の気分バイオリズム"
+      aria-label="最近${recentEntries.length}件の学習時間"
     >
       <defs>
-        <linearGradient id="rhythm-line-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#6aa9ff" />
-          <stop offset="45%" stop-color="#79c7b3" />
-          <stop offset="75%" stop-color="#ffd166" />
-          <stop offset="100%" stop-color="#f47fa2" />
+        <linearGradient id="study-line-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#2e7d72" />
+          <stop offset="100%" stop-color="#4d84b8" />
         </linearGradient>
-        <linearGradient id="rhythm-area-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#f47fa2" stop-opacity="0.24" />
-          <stop offset="100%" stop-color="#6aa9ff" stop-opacity="0.03" />
+        <linearGradient id="study-area-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#5eb7a6" stop-opacity="0.22" />
+          <stop offset="100%" stop-color="#5eb7a6" stop-opacity="0.02" />
         </linearGradient>
       </defs>
       <g class="rhythm-grid" aria-hidden="true">
@@ -291,19 +230,19 @@ function createBiorhythmSvg(recentEntries) {
         }" />
       </g>
       <path class="rhythm-area" d="${areaPath}" aria-hidden="true"></path>
-      <path class="rhythm-wave" d="${lineShape.path}" aria-hidden="true"></path>
+      <path class="rhythm-wave" d="${linePath}" aria-hidden="true"></path>
       ${points
-        .map((point) => {
-          return `
+        .map(
+          ({ x, y, entry }) => `
             <g class="rhythm-point">
-              <circle cx="${point.x}" cy="${point.y}" r="4.6"></circle>
-              <text x="${point.x}" y="${point.y - 10}" text-anchor="middle">${point.mood.face}</text>
-              <text class="rhythm-axis-label" x="${point.x}" y="${height - 10}" text-anchor="middle">${formatShortDate(
-                point.entry.date,
+              <circle cx="${x}" cy="${y}" r="4.6"></circle>
+              <text class="study-point-label" x="${x}" y="${y - 10}" text-anchor="middle">${entry.minutes}分</text>
+              <text class="rhythm-axis-label" x="${x}" y="${height - 10}" text-anchor="middle">${formatShortDate(
+                entry.date,
               )}</text>
             </g>
-          `;
-        })
+          `,
+        )
         .join("")}
     </svg>
   `;
@@ -321,69 +260,19 @@ function buildSmoothPath(points) {
   }, "");
 }
 
-function buildSinglePointWave(point, chartWidth) {
-  const waveWidth = chartWidth * 0.56;
-  const startX = point.x - waveWidth / 2;
-  const endX = point.x + waveWidth / 2;
-  const lift = 24;
-
-  return {
-    path: `M ${startX} ${point.y} C ${startX + waveWidth * 0.25} ${point.y - lift}, ${
-      startX + waveWidth * 0.75
-    } ${point.y + lift}, ${endX} ${point.y}`,
-    startX,
-    endX,
-  };
-}
-
-function getBiorhythmMessage(trend, average, entryLength) {
-  if (entryLength === 1) {
-    return "最初のリズムを記録しました";
-  }
-
-  if (trend >= 2) {
-    return "上向きのリズム";
-  }
-
-  if (trend >= 0.5) {
-    return "少し上向き";
-  }
-
-  if (trend <= -2) {
-    return "休むサイン多め";
-  }
-
-  if (trend <= -0.5) {
-    return "少し下がり気味";
-  }
-
-  if (average >= 4) {
-    return "安定していい流れ";
-  }
-
-  if (average <= 2.2) {
-    return "ゆっくり整えたいリズム";
-  }
-
-  return "安定したリズム";
-}
-
 function render() {
   sortEntries();
   renderSummary();
-  renderBiorhythm();
+  renderProgress();
   renderEntries();
 }
 
 function resetForm() {
   form.reset();
   dateInput.value = getTodayIso();
-  clearSelectedMood();
-  noteInput.value = "";
-  editingLabel.textContent = "今日の記録を書いています";
+  editingLabel.textContent = "今日の学習を記録しています";
   updateCharCount();
   updateSaveState("未保存");
-  renderBiorhythm();
 }
 
 function updateCharCount() {
@@ -396,22 +285,23 @@ function updateSaveState(text) {
 
 function loadEntryIntoForm(entry) {
   dateInput.value = entry.date;
-  setSelectedMood(entry.mood);
+  subjectInput.value = entry.subject;
+  minutesInput.value = entry.minutes;
   noteInput.value = entry.note;
-  editingLabel.textContent = `${formatDate(entry.date)}の記録を編集中`;
+  editingLabel.textContent = `${formatDate(entry.date)}の学習ログを編集中`;
   updateCharCount();
   updateSaveState("編集中");
-  renderBiorhythm();
 }
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
 
   const date = dateInput.value;
-  const mood = getSelectedMood();
+  const subject = subjectInput.value.trim();
+  const minutes = Number(minutesInput.value);
   const note = noteInput.value.trim();
 
-  if (!date || !mood || !note) {
+  if (!date || !subject || !Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
     updateSaveState("入力を確認");
     return;
   }
@@ -421,7 +311,8 @@ form.addEventListener("submit", (event) => {
   const nextEntry = {
     id: existingIndex >= 0 ? entries[existingIndex].id : createId(),
     date,
-    mood,
+    subject,
+    minutes,
     note,
     createdAt: existingIndex >= 0 ? entries[existingIndex].createdAt : now,
     updatedAt: now,
@@ -451,12 +342,12 @@ dateInput.addEventListener("change", () => {
     return;
   }
 
-  clearSelectedMood();
+  subjectInput.value = "";
+  minutesInput.value = "";
   noteInput.value = "";
-  editingLabel.textContent = `${formatDate(dateInput.value)}の記録を書いています`;
+  editingLabel.textContent = `${formatDate(dateInput.value)}の学習を記録しています`;
   updateCharCount();
   updateSaveState("未保存");
-  renderBiorhythm();
 });
 
 noteInput.addEventListener("input", () => {
@@ -464,13 +355,10 @@ noteInput.addEventListener("input", () => {
   updateSaveState("編集中");
 });
 
-form.querySelector("#mood-grid").addEventListener("change", () => {
-  updateSaveState("編集中");
-});
+subjectInput.addEventListener("input", () => updateSaveState("編集中"));
+minutesInput.addEventListener("input", () => updateSaveState("編集中"));
 
-clearButton.addEventListener("click", () => {
-  resetForm();
-});
+clearButton.addEventListener("click", resetForm);
 
 entryList.addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -493,7 +381,7 @@ entryList.addEventListener("click", (event) => {
   }
 
   if (button.dataset.action === "delete") {
-    const shouldDelete = confirm(`${formatDate(entry.date)}の記録を削除しますか？`);
+    const shouldDelete = confirm(`${formatDate(entry.date)}の学習ログを削除しますか？`);
 
     if (!shouldDelete) {
       return;
@@ -507,7 +395,6 @@ entryList.addEventListener("click", (event) => {
 });
 
 searchInput.addEventListener("input", renderEntries);
-moodFilter.addEventListener("change", renderEntries);
 
 dateInput.value = getTodayIso();
 updateCharCount();
